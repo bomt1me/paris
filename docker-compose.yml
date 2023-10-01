@@ -1,0 +1,27 @@
+services:
+  minio:
+    restart: always
+    image: minio/minio:latest
+    volumes:
+      - minio_data:/minio_data
+    command: server /minio_data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ACCESS_KEY=miniobomt1me
+      - MINIO_SECRET_KEY=miniobomt1me
+  initminio:
+    image: minio/mc
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      /usr/bin/mc config host add bomminio http://minio:9000 miniobomt1me miniobomt1me;
+      /usr/bin/mc rm -r --force bomminio/bom;
+      /usr/bin/mc mb bomminio/bom;
+      /usr/bin/mc policy download bomminio/bom;
+      exit 0;
+      "
+volumes:
+  minio_data:
