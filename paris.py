@@ -62,9 +62,10 @@ class File:
 
 
 class StorageEngine(abc.ABC):
-    @abc.abstractproperty
+    @property
+    @abc.abstractmethod
     def identifier(self):
-        return self._identifier
+        raise NotImplementedError
 
     @abc.abstractmethod
     def upload_file(self, file):
@@ -132,12 +133,12 @@ class Worker:
     def __init__(
         self,
         config,
-        queue,
+        worker_queue,
         cancellation_token,
         factory,
     ):
         self._config = config
-        self._queue = queue
+        self._worker_queue = worker_queue
         self._cancellation_token = cancellation_token
         self._factory = factory
         self._uploader = factory.build()
@@ -146,7 +147,7 @@ class Worker:
     def run(self):
         while not self._cancellation_token.is_set():
             try:
-                item = self._queue.get(block=False)
+                item = self._worker_queue.get(block=False)
             except queue.Empty:
                 item = None
 
@@ -160,12 +161,12 @@ class Manager:
     def __init__(
         self,
         config,
-        queue,
+        worker_queue,
         cancellation_token,
         factory,
     ):
         self._config = config
-        self._queue = queue
+        self._worker_queue = worker_queue
         self._cancellation_token = cancellation_token
         self._factory = factory
         self._workers = []
@@ -175,7 +176,9 @@ class Manager:
     def prepare(self):
         self._workers.clear()
         for _ in range(0, self._number_of_threads):
-            worker = Worker(self._config, self._queue, self._cancellation_token, self._factory)
+            worker = Worker(
+                self._config, self._worker_queue, self._cancellation_token, self._factory
+            )
             worker_thread = threading.Thread(target=worker.run)
             self._workers.append(worker_thread)
 
@@ -199,22 +202,31 @@ if __name__ == "__main__":
             ["files.provider", "s3"],
             ["worker.threads", "7"],
             ["worker.join.timeout", "60"],
-            ["worker.timeout", "0.05"]
+            ["worker.timeout", "0.05"],
         ]
     )
-    factory = StorageFactory(configuration)
+    storage_factory = StorageFactory(configuration)
     storage = SimpleStorage(configuration)
     file_upload_queue = queue.Queue()
-    cancellation_token = threading.Event()
-    factory.register(storage)
-    manager = Manager(configuration, file_upload_queue, cancellation_token, factory)
+    file_upload_cancellation_token = threading.Event()
+    storage_factory.register(storage)
+    manager = Manager(
+        configuration, file_upload_queue, file_upload_cancellation_token, storage_factory
+    )
     manager.prepare()
     manager.start()
 
     for idx in range(0, 1000):
-        file_upload_queue.put(File(configuration, "./carne_asada.dat", "upload", f"{idx}_carne_asada_{uuid.uuid4()}.dat"))
+        file_upload_queue.put(
+            File(
+                configuration,
+                "./carne_asada.dat",
+                "upload",
+                f"{idx}_carne_asada_{uuid.uuid4()}.dat",
+            )
+        )
 
     time.sleep(60)
-    cancellation_token.set()
+    file_upload_cancellation_token.set()
 
     manager.stop()
